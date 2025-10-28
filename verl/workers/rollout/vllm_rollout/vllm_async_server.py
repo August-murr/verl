@@ -369,8 +369,29 @@ class vLLMHttpServerBase:
         """Generate sequence with token-in-token-out."""
         # TODO(@wuxibin): switch to `/generate` http endpoint once multi-modal support ready.
         max_tokens = self.config.max_model_len - len(prompt_ids)
+        
+        # Phase 1: Hardcode max_tokens to 512 for now (will be replaced by interval later)
+        if self.config.prevent_eos_generation:
+            max_tokens = min(max_tokens, 512)
+        
         sampling_params["logprobs"] = 0 if sampling_params.pop("logprobs", False) else None
         sampling_params.setdefault("repetition_penalty", self.config.get("repetition_penalty", 1.0))
+        
+        # Phase 1: Prevent EOS generation if configured
+        if self.config.prevent_eos_generation:
+            # Enable ignore_eos in vLLM
+            sampling_params["ignore_eos"] = True
+            
+            # Set min_tokens to force generation to max_tokens
+            sampling_params["min_tokens"] = max_tokens
+            
+            # Suppress specified token IDs via logit_bias
+            if self.config.suppressed_token_ids:
+                logit_bias = sampling_params.get("logit_bias", {})
+                for token_id in self.config.suppressed_token_ids:
+                    logit_bias[token_id] = self.config.suppressed_tokens_logit_bias
+                sampling_params["logit_bias"] = logit_bias
+        
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = _qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         prompt = TokensPrompt(
