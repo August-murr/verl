@@ -1,0 +1,16 @@
+tools:
+  - class_name: "verl.tools.code_executor_tool.CodeExecutorTool"
+    config: 
+      type: native
+    tool_schema:
+      type: "function"
+      function:
+        name: "execute_code"
+        description: "A utility tool for executing Python code in a secure E2B sandbox environment. Use this like a calculator to run Python computations and get results."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: "The Python code to execute in the sandbox"
+          required: ["code"]
