@@ -43,6 +43,16 @@ enforce_eager: False
 # supported engines: vllm
 cudagraph_capture_sizes: null
 
+# EOS prevention for budget-controlled generation
+# Prevents model from generating EOS tokens by applying logit bias
+prevent_eos_generation: False
+
+# Token IDs to suppress via logit bias (e.g., [151643, 151645] for Qwen EOS tokens)
+suppressed_token_ids: null
+
+# Logit bias value for suppressed tokens (negative value makes them unlikely to sample)
+suppressed_tokens_logit_bias: -100.0
+
 # Whether to free engine KVCache after generation.
 free_cache_engine: True
 

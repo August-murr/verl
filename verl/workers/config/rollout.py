@@ -120,7 +120,7 @@ class RolloutConfig(BaseConfig):
     
     # EOS prevention for budget-controlled generation
     prevent_eos_generation: bool = False
-    suppressed_token_ids: Optional[list[int]] = None  # Token IDs to suppress via logit_bias
+    suppressed_token_ids: Optional[list] = None  # Token IDs to suppress via logit_bias
     suppressed_tokens_logit_bias: float = -100.0  # Logit bias value for suppressed tokens
     free_cache_engine: bool = True
     data_parallel_size: int = 1
