@@ -53,6 +53,11 @@ suppressed_token_ids: null
 # Logit bias value for suppressed tokens (negative value makes them unlikely to sample)
 suppressed_tokens_logit_bias: -100.0
 
+# Stop strings for generation (e.g., ["</tool_call>"] for Hermes tool format)
+# Default is ["</tool_call>"] for tool use tasks with Hermes format
+# Set to null or [] to disable stop strings
+stop: ["</tool_call>"]
+
 # Whether to free engine KVCache after generation.
 free_cache_engine: True
 

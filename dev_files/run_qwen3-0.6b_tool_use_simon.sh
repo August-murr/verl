@@ -54,6 +54,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.prevent_eos_generation=True \
     actor_rollout_ref.rollout.suppressed_token_ids='[151643,151645]' \
     actor_rollout_ref.rollout.suppressed_tokens_logit_bias=-100.0 \
+    actor_rollout_ref.rollout.stop='["</tool_call>"]' \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \

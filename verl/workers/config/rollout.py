@@ -122,6 +122,10 @@ class RolloutConfig(BaseConfig):
     prevent_eos_generation: bool = False
     suppressed_token_ids: Optional[list] = None  # Token IDs to suppress via logit_bias
     suppressed_tokens_logit_bias: float = -100.0  # Logit bias value for suppressed tokens
+    
+    # Stop strings for generation (e.g., ["</tool_call>"] for Hermes tool format)
+    stop: Optional[list] = None
+    
     free_cache_engine: bool = True
     data_parallel_size: int = 1
     expert_parallel_size: int = 1

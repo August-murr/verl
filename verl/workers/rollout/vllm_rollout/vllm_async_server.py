@@ -392,6 +392,10 @@ class vLLMHttpServerBase:
                     logit_bias[token_id] = self.config.suppressed_tokens_logit_bias
                 sampling_params["logit_bias"] = logit_bias
         
+        # Add stop strings if configured (e.g., ["</tool_call>"] for tool use)
+        if self.config.stop:
+            sampling_params["stop"] = self.config.stop
+        
         sampling_params = SamplingParams(max_tokens=max_tokens, **sampling_params)
         prompt_ids = _qwen2_5_vl_dedup_image_tokens(prompt_ids, self.model_config.processor)
         prompt = TokensPrompt(
