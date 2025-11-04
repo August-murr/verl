@@ -66,14 +66,11 @@ class BudgetCheckerConfig(BaseConfig):
     # Number of tokens to generate per interval before checking budget
     interval: int = 100
 
-    # Path to custom budget checker class file
+    # Path to custom budget checker function file
     path: Optional[str] = None
 
-    # Name of budget checker class (e.g., "CharacterCountBudgetChecker")
+    # Name of budget checker function (e.g., "character_count_budget_checker")
     name: Optional[str] = None
-
-    # Additional kwargs passed to budget checker __init__
-    kwargs: dict = field(default_factory=dict)
 
 
 @dataclass

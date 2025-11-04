@@ -220,12 +220,9 @@ budget_checker:
   path: null
   
   # Name of budget checker function (e.g., "character_count_budget_checker")
-  # The function should have signature: fn(text: str, token_ids: list[int], total_tokens_generated: int, **kwargs) -> bool
+  # The function should have signature: fn(text: str, token_ids: list[int], total_tokens_generated: int) -> bool
+  # All parameters should be defined inside the function itself
   name: null
-  
-  # Additional kwargs passed to budget checker function
-  # Example: {"max_chars": 500} for character_count_budget_checker
-  kwargs: {}
 
 # support logging rollout prob for debugging purpose
 # "Truncated importance sampling" requires rollout log probs, set to True when turning on Truncated importance sampling

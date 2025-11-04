@@ -13,139 +13,43 @@
 # limitations under the License.
 """Example budget checker functions for interval-based generation.
 
-Budget checkers are functions that determine when to stop generation.
+Budget checkers are simple functions that determine when to stop generation.
 They receive the generated text and token IDs, and return True to continue or False to stop.
 
 Function signature:
     def my_budget_checker(text: str, token_ids: list[int], total_tokens_generated: int) -> bool:
         # Return True to continue, False to stop
         pass
+
+Note: All parameters (like limits) should be hardcoded in the function definition.
 """
 
 
-def character_count_budget_checker(
-    text: str, 
-    token_ids: list[int],
-    total_tokens_generated: int,
-    max_chars: int = 500
-) -> bool:
-    """Stop generation when text exceeds character limit.
+def character_count_budget_checker(text: str, token_ids: list[int], total_tokens_generated: int) -> bool:
+    """Stop generation when text exceeds 500 characters.
     
     Args:
         text: The generated text so far
         token_ids: The generated token IDs so far
         total_tokens_generated: Total number of tokens generated
-        max_chars: Maximum character limit (default: 500)
         
     Returns:
-        True if should continue (text < max_chars), False to stop
+        True if should continue (text < 500 chars), False to stop
     """
-    return len(text) < max_chars
+    MAX_CHARS = 500
+    return len(text) < MAX_CHARS
 
 
-def token_count_budget_checker(
-    text: str, 
-    token_ids: list[int],
-    total_tokens_generated: int,
-    max_tokens: int = 1000
-) -> bool:
-    """Stop generation after N tokens.
+def token_count_budget_checker(text: str, token_ids: list[int], total_tokens_generated: int) -> bool:
+    """Stop generation after 1000 tokens.
     
     Args:
         text: The generated text so far
         token_ids: The generated token IDs so far
         total_tokens_generated: Total number of tokens generated
-        max_tokens: Maximum token limit (default: 1000)
         
     Returns:
-        True if should continue (tokens < max_tokens), False to stop
+        True if should continue (tokens < 1000), False to stop
     """
-    return total_tokens_generated < max_tokens
-
-from abc import ABC, abstractmethod
-from typing import Optional
-
-
-class BaseBudgetChecker(ABC):
-    """Base class for budget checking during interval-based generation.
-    
-    Budget checkers are used to determine when to stop generation in 
-    interval-based rollouts. They receive the generated text (and optionally
-    token IDs) and return True if generation should continue, False otherwise.
-    
-    Example:
-        class MyBudgetChecker(BaseBudgetChecker):
-            def __init__(self, max_chars: int = 1000, **kwargs):
-                super().__init__(**kwargs)
-                self.max_chars = max_chars
-            
-            def check(self, text, token_ids, total_tokens_generated):
-                return len(text) < self.max_chars
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize budget checker with optional kwargs from config."""
-        self.kwargs = kwargs
-
-    @abstractmethod
-    def check(
-        self,
-        text: str,
-        token_ids: list[int],
-        total_tokens_generated: int,
-    ) -> bool:
-        """Check if generation should continue.
-
-        Args:
-            text: The generated text so far (decoded from token_ids)
-            token_ids: The generated token IDs so far
-            total_tokens_generated: Total number of tokens generated so far
-
-        Returns:
-            bool: True if generation should continue, False to stop
-        """
-        raise NotImplementedError
-
-
-class CharacterCountBudgetChecker(BaseBudgetChecker):
-    """Simple test budget checker that stops when text exceeds character limit.
-    
-    Example usage in config:
-        actor_rollout_ref.rollout.budget_checker.name=CharacterCountBudgetChecker
-        actor_rollout_ref.rollout.budget_checker.kwargs='{"max_chars": 500}'
-    """
-
-    def __init__(self, max_chars: int = 500, **kwargs):
-        super().__init__(**kwargs)
-        self.max_chars = max_chars
-
-    def check(
-        self,
-        text: str,
-        token_ids: list[int],
-        total_tokens_generated: int,
-    ) -> bool:
-        """Stop generation when text exceeds max_chars."""
-        return len(text) < self.max_chars
-
-
-class TokenCountBudgetChecker(BaseBudgetChecker):
-    """Simple budget checker that stops after N tokens.
-    
-    Example usage in config:
-        actor_rollout_ref.rollout.budget_checker.name=TokenCountBudgetChecker
-        actor_rollout_ref.rollout.budget_checker.kwargs='{"max_tokens": 1000}'
-    """
-
-    def __init__(self, max_tokens: int = 1000, **kwargs):
-        super().__init__(**kwargs)
-        self.max_tokens = max_tokens
-
-    def check(
-        self,
-        text: str,
-        token_ids: list[int],
-        total_tokens_generated: int,
-    ) -> bool:
-        """Stop generation after max_tokens."""
-        return total_tokens_generated < self.max_tokens
+    MAX_TOKENS = 1000
+    return total_tokens_generated < MAX_TOKENS

@@ -121,7 +121,6 @@ class ToolAgentLoop(AgentLoopBase):
         
         # Initialize budget checker function
         cls.budget_checker_fn = None
-        cls.budget_checker_kwargs = {}
         budget_checker_config = config.actor_rollout_ref.rollout.get("budget_checker", None)
         if budget_checker_config and budget_checker_config.get("path"):
             from verl.utils.import_utils import load_extern_type
@@ -130,8 +129,7 @@ class ToolAgentLoop(AgentLoopBase):
                 budget_checker_config["name"]
             )
             cls.budget_checker_fn = budget_checker_fn
-            cls.budget_checker_kwargs = budget_checker_config.get("kwargs", {})
-            print(f"Initialized budget checker function: {budget_checker_config['name']} with kwargs: {cls.budget_checker_kwargs}")
+            print(f"Initialized budget checker function: {budget_checker_config['name']}")
         
         # Store interval configuration
         cls.interval = budget_checker_config.get("interval", 512) if budget_checker_config else 512
@@ -315,12 +313,11 @@ class ToolAgentLoop(AgentLoopBase):
                     lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
                 )
                 
-                # Call budget checker function with kwargs
-                should_continue = self.budget_checker_fn(
-                    text=text_so_far,
-                    token_ids=agent_data.response_ids,
-                    total_tokens_generated=len(agent_data.response_ids),
-                    **self.budget_checker_kwargs
+                # Call budget checker function directly via class to avoid method binding
+                should_continue = self.__class__.budget_checker_fn(
+                    text_so_far,
+                    agent_data.response_ids,
+                    len(agent_data.response_ids)
                 )
                 
                 if not should_continue:

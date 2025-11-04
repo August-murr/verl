@@ -1,6 +1,10 @@
 #!/bin/bash
 set -x
 
+# WORKAROUND: Disable NCCL P2P communication TP PREVENT FREEZES
+export NCCL_P2P_DISABLE=1
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+
 # WORKAROUND: Create placeholder directory for vLLM V1 LoRA bug
 # See: github_issue.md for details
 bash /root/verl/dev_files/setup_lora_placeholder.sh
@@ -56,9 +60,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.suppressed_tokens_logit_bias=-100.0 \
     actor_rollout_ref.rollout.stop='["</tool_call>"]' \
     actor_rollout_ref.rollout.budget_checker.interval=100 \
-    actor_rollout_ref.rollout.budget_checker.path=/workspaces/verl/verl/workers/rollout/budget_checker.py \
+    actor_rollout_ref.rollout.budget_checker.path=/root/verl/verl/workers/rollout/budget_checker.py \
     actor_rollout_ref.rollout.budget_checker.name=character_count_budget_checker \
-    actor_rollout_ref.rollout.budget_checker.kwargs='{"max_chars": 500}' \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \

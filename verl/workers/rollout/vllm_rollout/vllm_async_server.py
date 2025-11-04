@@ -368,22 +368,20 @@ class vLLMHttpServerBase:
     ) -> TokenOutput:
         """Generate sequence with token-in-token-out."""
         # TODO(@wuxibin): switch to `/generate` http endpoint once multi-modal support ready.
-        max_tokens = self.config.max_model_len - len(prompt_ids)
         
-        # Phase 1: Hardcode max_tokens to 512 for now (will be replaced by interval later)
-        if self.config.prevent_eos_generation:
-            max_tokens = min(max_tokens, 512)
+        # Extract max_tokens from sampling_params if provided (for interval-based generation)
+        # Otherwise, calculate default based on model length
+        max_tokens = sampling_params.pop("max_tokens", None)
+        if max_tokens is None:
+            max_tokens = self.config.max_model_len - len(prompt_ids)
         
         sampling_params["logprobs"] = 0 if sampling_params.pop("logprobs", False) else None
         sampling_params.setdefault("repetition_penalty", self.config.get("repetition_penalty", 1.0))
         
-        # Phase 1: Prevent EOS generation if configured
+        # Prevent EOS generation if configured
         if self.config.prevent_eos_generation:
             # Enable ignore_eos in vLLM
             sampling_params["ignore_eos"] = True
-            
-            # Set min_tokens to force generation to max_tokens
-            sampling_params["min_tokens"] = max_tokens
             
             # Suppress specified token IDs via logit_bias
             if self.config.suppressed_token_ids:
