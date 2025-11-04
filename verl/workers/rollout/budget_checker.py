@@ -1,4 +1,4 @@
-# Copyright 2025 Bytedance Ltd. and/or its affiliates
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,56 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Example budget checker functions for interval-based generation.
+
+Budget checkers are functions that determine when to stop generation.
+They receive the generated text and token IDs, and return True to continue or False to stop.
+
+Function signature:
+    def my_budget_checker(text: str, token_ids: list[int], total_tokens_generated: int) -> bool:
+        # Return True to continue, False to stop
+        pass
+"""
+
+
+def character_count_budget_checker(
+    text: str, 
+    token_ids: list[int],
+    total_tokens_generated: int,
+    max_chars: int = 500
+) -> bool:
+    """Stop generation when text exceeds character limit.
+    
+    Args:
+        text: The generated text so far
+        token_ids: The generated token IDs so far
+        total_tokens_generated: Total number of tokens generated
+        max_chars: Maximum character limit (default: 500)
+        
+    Returns:
+        True if should continue (text < max_chars), False to stop
+    """
+    return len(text) < max_chars
+
+
+def token_count_budget_checker(
+    text: str, 
+    token_ids: list[int],
+    total_tokens_generated: int,
+    max_tokens: int = 1000
+) -> bool:
+    """Stop generation after N tokens.
+    
+    Args:
+        text: The generated text so far
+        token_ids: The generated token IDs so far
+        total_tokens_generated: Total number of tokens generated
+        max_tokens: Maximum token limit (default: 1000)
+        
+    Returns:
+        True if should continue (tokens < max_tokens), False to stop
+    """
+    return total_tokens_generated < max_tokens
 
 from abc import ABC, abstractmethod
 from typing import Optional

@@ -119,17 +119,19 @@ class ToolAgentLoop(AgentLoopBase):
         if cls.interaction_config_file:
             cls.interaction_map: dict[str, BaseInteraction] = cls._initialize_interactions(cls.interaction_config_file)
         
-        # Initialize budget checker
-        cls.budget_checker = None
+        # Initialize budget checker function
+        cls.budget_checker_fn = None
+        cls.budget_checker_kwargs = {}
         budget_checker_config = config.actor_rollout_ref.rollout.get("budget_checker", None)
         if budget_checker_config and budget_checker_config.get("path"):
             from verl.utils.import_utils import load_extern_type
-            checker_cls = load_extern_type(
+            budget_checker_fn = load_extern_type(
                 budget_checker_config["path"],
                 budget_checker_config["name"]
             )
-            cls.budget_checker = checker_cls(**budget_checker_config.get("kwargs", {}))
-            print(f"Initialized budget checker: {budget_checker_config['name']} with kwargs: {budget_checker_config.get('kwargs', {})}")
+            cls.budget_checker_fn = budget_checker_fn
+            cls.budget_checker_kwargs = budget_checker_config.get("kwargs", {})
+            print(f"Initialized budget checker function: {budget_checker_config['name']} with kwargs: {cls.budget_checker_kwargs}")
         
         # Store interval configuration
         cls.interval = budget_checker_config.get("interval", 512) if budget_checker_config else 512
@@ -304,8 +306,8 @@ class ToolAgentLoop(AgentLoopBase):
             # Hit stop string or EOS, route based on content
             return await self._route_after_generation(agent_data)
         
-        # Check budget if budget checker is configured
-        if self.budget_checker:
+        # Check budget if budget checker function is configured
+        if self.budget_checker_fn:
             try:
                 # Decode all generated text so far
                 text_so_far = await self.loop.run_in_executor(
@@ -313,11 +315,12 @@ class ToolAgentLoop(AgentLoopBase):
                     lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
                 )
                 
-                # Check budget
-                should_continue = self.budget_checker.check(
+                # Call budget checker function with kwargs
+                should_continue = self.budget_checker_fn(
                     text=text_so_far,
                     token_ids=agent_data.response_ids,
-                    total_tokens_generated=len(agent_data.response_ids)
+                    total_tokens_generated=len(agent_data.response_ids),
+                    **self.budget_checker_kwargs
                 )
                 
                 if not should_continue:

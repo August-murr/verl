@@ -215,15 +215,16 @@ budget_checker:
   # Each interval generates this many tokens, then checks if generation should continue
   interval: 100
   
-  # Path to custom budget checker class (null to disable budget checking)
-  # Example: /workspaces/verl/verl/workers/rollout/budget_checker.py
+  # Path to custom budget checker function (null to disable budget checking)
+  # Example: /path/to/my_budget_checker.py
   path: null
   
-  # Name of budget checker class (e.g., "CharacterCountBudgetChecker")
+  # Name of budget checker function (e.g., "character_count_budget_checker")
+  # The function should have signature: fn(text: str, token_ids: list[int], total_tokens_generated: int, **kwargs) -> bool
   name: null
   
-  # Additional kwargs passed to budget checker
-  # Example: {"max_chars": 500} for CharacterCountBudgetChecker
+  # Additional kwargs passed to budget checker function
+  # Example: {"max_chars": 500} for character_count_budget_checker
   kwargs: {}
 
 # support logging rollout prob for debugging purpose
