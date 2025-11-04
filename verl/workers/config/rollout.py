@@ -23,6 +23,7 @@ from verl.utils.profiler import ProfilerConfig
 __all__ = [
     "SamplingConfig",
     "MultiTurnConfig",
+    "BudgetCheckerConfig",
     "CustomAsyncServerConfig",
     "AgentLoopConfig",
     "TraceConfig",
@@ -56,6 +57,23 @@ class MultiTurnConfig(BaseConfig):
     tokenization_sanity_check_mode: str = "strict"
     format: str = "hermes"
     num_repeat_rollouts: Optional[int] = None
+
+
+@dataclass
+class BudgetCheckerConfig(BaseConfig):
+    """Configuration for budget checking during interval-based generation."""
+
+    # Number of tokens to generate per interval before checking budget
+    interval: int = 100
+
+    # Path to custom budget checker class file
+    path: Optional[str] = None
+
+    # Name of budget checker class (e.g., "CharacterCountBudgetChecker")
+    name: Optional[str] = None
+
+    # Additional kwargs passed to budget checker __init__
+    kwargs: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -159,6 +177,9 @@ class RolloutConfig(BaseConfig):
     trace: TraceConfig = field(default_factory=TraceConfig)
 
     multi_turn: MultiTurnConfig = field(default_factory=MultiTurnConfig)
+
+    # Budget checking configuration
+    budget_checker: Optional[BudgetCheckerConfig] = None
 
     # Server configuration for sglang server mode
     server: ServerConfig = field(default_factory=ServerConfig)

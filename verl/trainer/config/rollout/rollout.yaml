@@ -207,6 +207,25 @@ multi_turn:
   # Number of repeat rollouts for each interaction
   num_repeat_rollouts: null
 
+# Budget checking for interval-based generation
+budget_checker:
+  _target_: verl.workers.config.BudgetCheckerConfig
+  
+  # Number of tokens to generate per interval before checking budget
+  # Each interval generates this many tokens, then checks if generation should continue
+  interval: 100
+  
+  # Path to custom budget checker class (null to disable budget checking)
+  # Example: /workspaces/verl/verl/workers/rollout/budget_checker.py
+  path: null
+  
+  # Name of budget checker class (e.g., "CharacterCountBudgetChecker")
+  name: null
+  
+  # Additional kwargs passed to budget checker
+  # Example: {"max_chars": 500} for CharacterCountBudgetChecker
+  kwargs: {}
+
 # support logging rollout prob for debugging purpose
 # "Truncated importance sampling" requires rollout log probs, set to True when turning on Truncated importance sampling
 calculate_log_probs: False

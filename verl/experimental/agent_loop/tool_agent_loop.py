@@ -37,6 +37,7 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 class AgentState(Enum):
     PENDING = "pending"
     GENERATING = "generating"
+    CHECKING_BUDGET = "checking_budget"
     PROCESSING_TOOLS = "processing_tools"
     TERMINATED = "terminated"
     INTERACTING = "interacting"
@@ -75,6 +76,11 @@ class AgentData:
 
         # Temporary state for tool calls
         self.tool_calls: list[FunctionCall] = []
+        
+        # Interval tracking for budget checking
+        self.interval_count: int = 0
+        self.current_interval_tokens: list[int] = []
+        self.is_first_interval_of_turn: bool = True
 
 
 @register("tool_agent")
@@ -112,6 +118,22 @@ class ToolAgentLoop(AgentLoopBase):
         cls.interaction_config_file = config.actor_rollout_ref.rollout.multi_turn.interaction_config_path
         if cls.interaction_config_file:
             cls.interaction_map: dict[str, BaseInteraction] = cls._initialize_interactions(cls.interaction_config_file)
+        
+        # Initialize budget checker
+        cls.budget_checker = None
+        budget_checker_config = config.actor_rollout_ref.rollout.get("budget_checker", None)
+        if budget_checker_config and budget_checker_config.get("path"):
+            from verl.utils.import_utils import load_extern_type
+            checker_cls = load_extern_type(
+                budget_checker_config["path"],
+                budget_checker_config["name"]
+            )
+            cls.budget_checker = checker_cls(**budget_checker_config.get("kwargs", {}))
+            print(f"Initialized budget checker: {budget_checker_config['name']} with kwargs: {budget_checker_config.get('kwargs', {})}")
+        
+        # Store interval configuration
+        cls.interval = budget_checker_config.get("interval", 512) if budget_checker_config else 512
+        print(f"Generation interval set to: {cls.interval} tokens")
 
     @rollout_trace_op
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
@@ -154,6 +176,8 @@ class ToolAgentLoop(AgentLoopBase):
                 state = await self._handle_pending_state(agent_data, sampling_params)
             elif state == AgentState.GENERATING:
                 state = await self._handle_generating_state(agent_data, sampling_params)
+            elif state == AgentState.CHECKING_BUDGET:
+                state = await self._handle_checking_budget_state(agent_data, sampling_params)
             elif state == AgentState.PROCESSING_TOOLS:
                 state = await self._handle_processing_tools_state(agent_data)
             elif state == AgentState.INTERACTING:
@@ -212,50 +236,125 @@ class ToolAgentLoop(AgentLoopBase):
     async def _handle_generating_state(
         self, agent_data: AgentData, sampling_params: dict[str, Any], ignore_termination: bool = False
     ) -> AgentState:
-        """Handle the generating state: generate model response and check for tool calls."""
-        add_messages: list[dict[str, Any]] = []
-
+        """Handle the generating state: generate ONE interval of tokens."""
+        
+        # Calculate max_tokens for this interval
+        max_tokens_this_interval = min(
+            self.interval,
+            self.response_length - len(agent_data.response_mask)
+        )
+        
+        if max_tokens_this_interval <= 0:
+            # Reached response length limit
+            return AgentState.TERMINATED
+        
+        # Override max_tokens in sampling_params for this interval
+        interval_sampling_params = sampling_params.copy()
+        interval_sampling_params["max_tokens"] = max_tokens_this_interval
+        
+        # Generate for this interval
         with simple_timer("generate_sequences", agent_data.metrics):
             output = await self.server_manager.generate(
-                request_id=agent_data.request_id,
+                request_id=f"{agent_data.request_id}_interval_{agent_data.interval_count}",
                 prompt_ids=agent_data.prompt_ids,
-                sampling_params=sampling_params,
+                sampling_params=interval_sampling_params,
                 image_data=agent_data.image_data,
             )
-
-        agent_data.assistant_turns += 1
-        agent_data.response_ids = output.token_ids
-        agent_data.prompt_ids += agent_data.response_ids
-        agent_data.response_mask += [1] * len(agent_data.response_ids)
+        
+        # Store tokens from this interval
+        agent_data.current_interval_tokens = output.token_ids
+        agent_data.interval_count += 1
+        
+        # Increment assistant_turns only on first interval of a turn
+        if agent_data.is_first_interval_of_turn:
+            agent_data.assistant_turns += 1
+            agent_data.is_first_interval_of_turn = False
+        
+        # Accumulate results
+        agent_data.response_ids.extend(output.token_ids)
+        agent_data.prompt_ids += output.token_ids
+        agent_data.response_mask += [1] * len(output.token_ids)
         if output.log_probs:
             agent_data.response_logprobs += output.log_probs
+        
+        # Always go to budget checking after generation
+        return AgentState.CHECKING_BUDGET
 
-        # Check termination conditions
-        if not ignore_termination and len(agent_data.response_mask) >= self.response_length:
+    async def _handle_checking_budget_state(
+        self, agent_data: AgentData, sampling_params: dict[str, Any]
+    ) -> AgentState:
+        """Check budget and route to next state."""
+        
+        # Check if we hit response length limit
+        if len(agent_data.response_mask) >= self.response_length:
             return AgentState.TERMINATED
+        
+        # Check if we hit max turns
         if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
             return AgentState.TERMINATED
         if self.max_user_turns and agent_data.user_turns >= self.max_user_turns:
             return AgentState.TERMINATED
+        
+        # Check if fewer tokens generated than requested (hit stop or EOS)
+        expected_tokens = min(
+            self.interval,
+            self.response_length - len(agent_data.response_mask) + len(agent_data.current_interval_tokens)
+        )
+        if len(agent_data.current_interval_tokens) < expected_tokens:
+            # Hit stop string or EOS, route based on content
+            return await self._route_after_generation(agent_data)
+        
+        # Check budget if budget checker is configured
+        if self.budget_checker:
+            try:
+                # Decode all generated text so far
+                text_so_far = await self.loop.run_in_executor(
+                    None,
+                    lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
+                )
+                
+                # Check budget
+                should_continue = self.budget_checker.check(
+                    text=text_so_far,
+                    token_ids=agent_data.response_ids,
+                    total_tokens_generated=len(agent_data.response_ids)
+                )
+                
+                if not should_continue:
+                    # Budget exhausted, terminate
+                    logger.info(f"Budget exhausted after {agent_data.interval_count} intervals ({len(agent_data.response_ids)} tokens)")
+                    return AgentState.TERMINATED
+            except Exception as e:
+                logger.error(f"Budget checker raised exception: {e}. Continuing generation.")
+        
+        # Budget OK, route based on content
+        return await self._route_after_generation(agent_data)
 
-        # Extract tool calls
+    async def _route_after_generation(self, agent_data: AgentData) -> AgentState:
+        """Decide next state based on generated content."""
+        
+        # Extract tool calls from ALL response_ids (not just current interval)
         _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
-
-        # Handle interaction if needed
+        
+        # Handle interaction if needed (add message to conversation)
+        add_messages: list[dict[str, Any]] = []
         if self.interaction_config_file:
             assistant_message = await self.loop.run_in_executor(
                 None, lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
             )
             add_messages.append({"role": "assistant", "content": assistant_message})
             agent_data.messages.extend(add_messages)
-
+        
         # Determine next state
         if agent_data.tool_calls:
+            # Found tool calls, process them
             return AgentState.PROCESSING_TOOLS
         elif self.interaction_config_file:
+            # Need user interaction
             return AgentState.INTERACTING
         else:
-            return AgentState.TERMINATED
+            # No tools, no interaction - continue generating next interval
+            return AgentState.GENERATING
 
     async def _handle_processing_tools_state(self, agent_data: AgentData) -> AgentState:
         """Handle the processing tools state: execute tool calls and prepare tool responses."""
@@ -372,6 +471,11 @@ class ToolAgentLoop(AgentLoopBase):
         if agent_data.response_logprobs:
             agent_data.response_logprobs += [0.0] * len(response_ids)
         agent_data.user_turns += 1
+        
+        # Reset interval tracking for new turn
+        agent_data.is_first_interval_of_turn = True
+        agent_data.response_ids = []  # Clear response_ids for next turn
+        
         return AgentState.GENERATING
 
     async def _handle_interacting_state(self, agent_data: AgentData) -> AgentState:
@@ -423,6 +527,9 @@ class ToolAgentLoop(AgentLoopBase):
         if should_terminate_sequence:
             return AgentState.TERMINATED
         else:
+            # Reset interval tracking for new turn
+            agent_data.is_first_interval_of_turn = True
+            agent_data.response_ids = []  # Clear response_ids for next turn
             return AgentState.GENERATING
 
     async def _call_tool(
