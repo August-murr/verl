@@ -111,6 +111,16 @@ class ToolAgentLoop(AgentLoopBase):
         cls.apply_chat_template_kwargs = config.data.get("apply_chat_template_kwargs", {})
         cls.prompt_length = config.actor_rollout_ref.rollout.prompt_length
         cls.response_length = config.actor_rollout_ref.rollout.response_length
+        
+        # Configure max_model_len (context window limit)
+        # Use explicit max_model_len if set, otherwise fallback to prompt_length + response_length
+        cls.max_model_len = config.actor_rollout_ref.rollout.get("max_model_len")
+        if cls.max_model_len is None:
+            cls.max_model_len = cls.prompt_length + cls.response_length
+            print(f"max_model_len not set, defaulting to prompt_length + response_length = {cls.max_model_len}")
+        else:
+            print(f"Using explicit max_model_len = {cls.max_model_len}")
+        
         cls.system_prompt = tokenizer.apply_chat_template(
             [{}], add_generation_prompt=False, tokenize=True, **cls.apply_chat_template_kwargs
         )
@@ -238,15 +248,20 @@ class ToolAgentLoop(AgentLoopBase):
     ) -> AgentState:
         """Handle the generating state: generate ONE interval of tokens."""
         
-        # Calculate max_tokens for this interval
-        max_tokens_this_interval = min(
-            self.interval,
-            self.response_length - len(agent_data.response_mask)
-        )
+        # Calculate remaining space in context window
+        current_prompt_len = len(agent_data.prompt_ids)
+        remaining_tokens = self.max_model_len - current_prompt_len
         
-        if max_tokens_this_interval <= 0:
-            # Reached response length limit
+        if remaining_tokens <= 0:
+            # Reached max_model_len (context window full)
+            logger.info(f"Terminating: context window full (prompt_len={current_prompt_len}, max_model_len={self.max_model_len})")
             return AgentState.TERMINATED
+        
+        # Calculate max_tokens for this interval (fill up to max_model_len)
+        max_tokens_this_interval = min(self.interval, remaining_tokens)
+        
+        logger.debug(f"Interval {agent_data.interval_count}: generating up to {max_tokens_this_interval} tokens "
+                    f"(remaining in context: {remaining_tokens})")
         
         # Override max_tokens in sampling_params for this interval
         interval_sampling_params = sampling_params.copy()
@@ -285,8 +300,10 @@ class ToolAgentLoop(AgentLoopBase):
     ) -> AgentState:
         """Check budget and route to next state."""
         
-        # Check if we hit response length limit
-        if len(agent_data.response_mask) >= self.response_length:
+        # Check if we hit max_model_len (context window full)
+        current_prompt_len = len(agent_data.prompt_ids)
+        if current_prompt_len >= self.max_model_len:
+            logger.info(f"Terminating: reached max_model_len ({current_prompt_len}/{self.max_model_len})")
             return AgentState.TERMINATED
         
         # Check if we hit max turns
@@ -295,11 +312,11 @@ class ToolAgentLoop(AgentLoopBase):
         if self.max_user_turns and agent_data.user_turns >= self.max_user_turns:
             return AgentState.TERMINATED
         
+        # Calculate remaining space and expected tokens
+        remaining_tokens = self.max_model_len - current_prompt_len
+        expected_tokens = min(self.interval, remaining_tokens)
+        
         # Check if fewer tokens generated than requested (hit stop or EOS)
-        expected_tokens = min(
-            self.interval,
-            self.response_length - len(agent_data.response_mask) + len(agent_data.current_interval_tokens)
-        )
         if len(agent_data.current_interval_tokens) < expected_tokens:
             # Hit stop string or EOS, route based on content
             return await self._route_after_generation(agent_data)
@@ -463,8 +480,13 @@ class ToolAgentLoop(AgentLoopBase):
                     lambda: self.tokenizer.apply_chat_template(add_messages, add_generation_prompt=True, tokenize=True),
                 )
                 response_ids = response_ids[len(self.system_prompt) :]
-        if len(agent_data.response_mask) + len(response_ids) >= self.response_length:
+        
+        # Check if adding tool response would exceed max_model_len
+        if len(agent_data.prompt_ids) + len(response_ids) >= self.max_model_len:
+            logger.info(f"Terminating: adding tool response would exceed max_model_len "
+                       f"({len(agent_data.prompt_ids) + len(response_ids)} >= {self.max_model_len})")
             return AgentState.TERMINATED
+        
         # Update prompt_ids and response_mask
         agent_data.prompt_ids += response_ids
         agent_data.response_mask += [0] * len(response_ids)
@@ -516,13 +538,18 @@ class ToolAgentLoop(AgentLoopBase):
             )
         response_ids = response_ids[len(self.system_prompt) :]
 
+        # Check if adding user response would exceed max_model_len
+        if len(agent_data.prompt_ids) + len(response_ids) >= self.max_model_len:
+            logger.info(f"Terminating: adding user response would exceed max_model_len "
+                       f"({len(agent_data.prompt_ids) + len(response_ids)} >= {self.max_model_len})")
+            return AgentState.TERMINATED
+
         # Update prompt_ids and response_mask
         agent_data.prompt_ids += response_ids
         agent_data.response_mask += [0] * len(response_ids)
         if agent_data.response_logprobs:
             agent_data.response_logprobs += [0.0] * len(response_ids)
 
-        # double check prompt
         # Check termination condition
         if should_terminate_sequence:
             return AgentState.TERMINATED

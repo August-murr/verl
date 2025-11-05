@@ -24,6 +24,7 @@ python3 -m verl.trainer.main_ppo \
     data.return_raw_chat=$return_raw_chat \
     data.train_batch_size=32 \
     data.max_prompt_length=512 \
+    actor_rollout_ref.rollout.max_model_len=2048 \
     data.max_response_length=1024 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
