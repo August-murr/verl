@@ -31,7 +31,7 @@ from verl.utils.profiler import simple_timer
 from verl.utils.rollout_trace import rollout_trace_op
 
 logger = logging.getLogger(__file__)
-logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))  # Set to INFO for interval debugging
 
 
 class AgentState(Enum):
@@ -152,6 +152,16 @@ class ToolAgentLoop(AgentLoopBase):
         metrics = {}
         request_id = uuid4().hex
         tools_kwargs = kwargs.get("tools_kwargs", {})
+        
+        logger.info(f"\n\n{'#'*80}")
+        logger.info(f"{'#'*80}")
+        logger.info(f"##  🚀 STARTING NEW ROLLOUT")
+        logger.info(f"##  Request ID: {request_id}")
+        logger.info(f"##  Max model length: {self.max_model_len}")
+        logger.info(f"##  Generation interval: {self.interval}")
+        logger.info(f"##  Budget checker: {self.budget_checker_fn.__name__ if self.budget_checker_fn else 'None'}")
+        logger.info(f"{'#'*80}")
+        logger.info(f"{'#'*80}\n")
 
         # Initialize interaction if needed
         interaction = None
@@ -200,6 +210,23 @@ class ToolAgentLoop(AgentLoopBase):
         response_ids = agent_data.prompt_ids[-len(agent_data.response_mask) :]
         prompt_ids = agent_data.prompt_ids[: len(agent_data.prompt_ids) - len(agent_data.response_mask)]
         multi_modal_data = {"image": agent_data.image_data} if agent_data.image_data is not None else {}
+        
+        logger.info(f"\n\n{'#'*80}")
+        logger.info(f"{'#'*80}")
+        logger.info(f"##  ✅ ROLLOUT COMPLETE")
+        logger.info(f"##  Request ID: {request_id}")
+        logger.info(f"{'#'*80}")
+        logger.info(f"##  📊 FINAL STATISTICS:")
+        logger.info(f"##     Total intervals: {agent_data.interval_count}")
+        logger.info(f"##     Total prompt tokens: {len(agent_data.prompt_ids)}")
+        logger.info(f"##     Total response tokens: {len(response_ids)}")
+        logger.info(f"##     Assistant turns: {agent_data.assistant_turns}")
+        logger.info(f"##     User turns: {agent_data.user_turns}")
+        logger.info(f"##     Tool calls: {len(agent_data.tool_rewards)}")
+        logger.info(f"##     Context usage: {len(agent_data.prompt_ids)}/{self.max_model_len} ({100*len(agent_data.prompt_ids)/self.max_model_len:.1f}%)")
+        logger.info(f"{'#'*80}")
+        logger.info(f"{'#'*80}\n\n")
+        
         output = AgentLoopOutput(
             prompt_ids=prompt_ids,
             response_ids=response_ids[: self.response_length],
@@ -252,22 +279,47 @@ class ToolAgentLoop(AgentLoopBase):
         current_prompt_len = len(agent_data.prompt_ids)
         remaining_tokens = self.max_model_len - current_prompt_len
         
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🔄 GENERATING STATE - Interval #{agent_data.interval_count + 1}")
+        logger.info(f"{'='*80}")
+        logger.info(f"  Current prompt length: {current_prompt_len} tokens")
+        logger.info(f"  Max model length: {self.max_model_len} tokens")
+        logger.info(f"  Remaining tokens: {remaining_tokens} tokens")
+        logger.info(f"  Configured interval: {self.interval} tokens")
+        
         if remaining_tokens <= 0:
             # Reached max_model_len (context window full)
-            logger.info(f"Terminating: context window full (prompt_len={current_prompt_len}, max_model_len={self.max_model_len})")
+            logger.info(f"  ❌ TERMINATING: Context window full!")
+            logger.info(f"{'='*80}\n")
             return AgentState.TERMINATED
         
         # Calculate max_tokens for this interval (fill up to max_model_len)
         max_tokens_this_interval = min(self.interval, remaining_tokens)
+        is_last_interval = max_tokens_this_interval < self.interval
         
-        logger.debug(f"Interval {agent_data.interval_count}: generating up to {max_tokens_this_interval} tokens "
-                    f"(remaining in context: {remaining_tokens})")
+        if is_last_interval:
+            logger.info(f"  ⚠️  LAST INTERVAL (partial): {max_tokens_this_interval} tokens < interval {self.interval}")
+        else:
+            logger.info(f"  ✓ Full interval: {max_tokens_this_interval} tokens")
         
         # Override max_tokens in sampling_params for this interval
         interval_sampling_params = sampling_params.copy()
         interval_sampling_params["max_tokens"] = max_tokens_this_interval
         
+        logger.info(f"\n  📤 Sending vLLM request:")
+        logger.info(f"     Request ID: {agent_data.request_id}_interval_{agent_data.interval_count}")
+        logger.info(f"     Prompt IDs length: {len(agent_data.prompt_ids)}")
+        logger.info(f"     Max tokens (THIS REQUEST): {interval_sampling_params['max_tokens']}")
+        logger.info(f"     Temperature: {interval_sampling_params.get('temperature', 'N/A')}")
+        logger.info(f"     Top-p: {interval_sampling_params.get('top_p', 'N/A')}")
+        logger.info(f"     Top-k: {interval_sampling_params.get('top_k', 'N/A')}")
+        logger.info(f"     Stop strings: {interval_sampling_params.get('stop', 'N/A')}")
+        logger.info(f"     Image data: {'Present' if agent_data.image_data else 'None'}")
+        
         # Generate for this interval
+        import time
+        await asyncio.sleep(0.5)  # Small delay to make logging readable
+        
         with simple_timer("generate_sequences", agent_data.metrics):
             output = await self.server_manager.generate(
                 request_id=f"{agent_data.request_id}_interval_{agent_data.interval_count}",
@@ -279,6 +331,19 @@ class ToolAgentLoop(AgentLoopBase):
         # Store tokens from this interval
         agent_data.current_interval_tokens = output.token_ids
         agent_data.interval_count += 1
+        
+        logger.info(f"\n  📥 Received vLLM response:")
+        logger.info(f"     Tokens generated: {len(output.token_ids)}")
+        logger.info(f"     Expected tokens: {max_tokens_this_interval}")
+        if len(output.token_ids) < max_tokens_this_interval:
+            logger.info(f"     ⚠️  Generated fewer than expected (likely hit stop string or EOS)")
+        
+        # Decode and show generated text
+        generated_text = await self.loop.run_in_executor(
+            None,
+            lambda: self.tokenizer.decode(output.token_ids, skip_special_tokens=False)
+        )
+        logger.info(f"     Generated text: {repr(generated_text[:200])}{'...' if len(generated_text) > 200 else ''}")
         
         # Increment assistant_turns only on first interval of a turn
         if agent_data.is_first_interval_of_turn:
@@ -292,6 +357,13 @@ class ToolAgentLoop(AgentLoopBase):
         if output.log_probs:
             agent_data.response_logprobs += output.log_probs
         
+        logger.info(f"\n  📊 Accumulated statistics:")
+        logger.info(f"     Total response tokens so far: {len(agent_data.response_ids)}")
+        logger.info(f"     Total prompt tokens: {len(agent_data.prompt_ids)}")
+        logger.info(f"     Assistant turns: {agent_data.assistant_turns}")
+        logger.info(f"     User turns: {agent_data.user_turns}")
+        logger.info(f"{'='*80}\n")
+        
         # Always go to budget checking after generation
         return AgentState.CHECKING_BUDGET
 
@@ -300,35 +372,64 @@ class ToolAgentLoop(AgentLoopBase):
     ) -> AgentState:
         """Check budget and route to next state."""
         
+        logger.info(f"\n{'='*80}")
+        logger.info(f"💰 CHECKING BUDGET STATE")
+        logger.info(f"{'='*80}")
+        
         # Check if we hit max_model_len (context window full)
         current_prompt_len = len(agent_data.prompt_ids)
+        logger.info(f"  Current prompt length: {current_prompt_len}/{self.max_model_len}")
+        
         if current_prompt_len >= self.max_model_len:
-            logger.info(f"Terminating: reached max_model_len ({current_prompt_len}/{self.max_model_len})")
+            logger.info(f"  ❌ TERMINATING: Reached max_model_len!")
+            logger.info(f"{'='*80}\n")
             return AgentState.TERMINATED
         
         # Check if we hit max turns
+        logger.info(f"  Turn limits: assistant={agent_data.assistant_turns}/{self.max_assistant_turns or 'unlimited'}, "
+                   f"user={agent_data.user_turns}/{self.max_user_turns or 'unlimited'}")
+        
         if self.max_assistant_turns and agent_data.assistant_turns >= self.max_assistant_turns:
+            logger.info(f"  ❌ TERMINATING: Max assistant turns reached!")
+            logger.info(f"{'='*80}\n")
             return AgentState.TERMINATED
         if self.max_user_turns and agent_data.user_turns >= self.max_user_turns:
+            logger.info(f"  ❌ TERMINATING: Max user turns reached!")
+            logger.info(f"{'='*80}\n")
             return AgentState.TERMINATED
         
         # Calculate remaining space and expected tokens
         remaining_tokens = self.max_model_len - current_prompt_len
         expected_tokens = min(self.interval, remaining_tokens)
         
+        logger.info(f"  Tokens in last interval: {len(agent_data.current_interval_tokens)}/{expected_tokens} expected")
+        
         # Check if fewer tokens generated than requested (hit stop or EOS)
         if len(agent_data.current_interval_tokens) < expected_tokens:
             # Hit stop string or EOS, route based on content
+            logger.info(f"  ⚠️  Hit stop string or EOS (generated < expected)")
+            logger.info(f"  → Routing based on content (checking for tools)...")
+            logger.info(f"{'='*80}\n")
             return await self._route_after_generation(agent_data)
         
         # Check budget if budget checker function is configured
         if self.budget_checker_fn:
+            logger.info(f"\n  🔍 Running budget checker: {self.budget_checker_fn.__name__}")
+            
             try:
                 # Decode all generated text so far
                 text_so_far = await self.loop.run_in_executor(
                     None,
                     lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
                 )
+                
+                logger.info(f"\n  📋 Budget checker inputs:")
+                logger.info(f"     text: {repr(text_so_far[:100])}{'...' if len(text_so_far) > 100 else ''}")
+                logger.info(f"     text length: {len(text_so_far)} characters")
+                logger.info(f"     token_ids length: {len(agent_data.response_ids)} tokens")
+                logger.info(f"     total_tokens_generated: {len(agent_data.response_ids)}")
+                
+                await asyncio.sleep(0.3)  # Small delay to make logging readable
                 
                 # Call budget checker function directly via class to avoid method binding
                 should_continue = self.__class__.budget_checker_fn(
@@ -337,21 +438,40 @@ class ToolAgentLoop(AgentLoopBase):
                     len(agent_data.response_ids)
                 )
                 
+                logger.info(f"\n  📊 Budget checker result: {'✓ Continue' if should_continue else '❌ Stop'}")
+                
                 if not should_continue:
                     # Budget exhausted, terminate
-                    logger.info(f"Budget exhausted after {agent_data.interval_count} intervals ({len(agent_data.response_ids)} tokens)")
+                    logger.info(f"  ❌ TERMINATING: Budget exhausted after {agent_data.interval_count} intervals ({len(agent_data.response_ids)} tokens)")
+                    logger.info(f"{'='*80}\n")
                     return AgentState.TERMINATED
+                else:
+                    logger.info(f"  ✓ Budget OK, continuing...")
+                    
             except Exception as e:
-                logger.error(f"Budget checker raised exception: {e}. Continuing generation.")
+                logger.error(f"  ❌ Budget checker raised exception: {e}. Continuing generation.")
+        else:
+            logger.info(f"  ℹ️  No budget checker configured")
         
         # Budget OK, route based on content
+        logger.info(f"  → Routing based on content (checking for tools)...")
+        logger.info(f"{'='*80}\n")
         return await self._route_after_generation(agent_data)
 
     async def _route_after_generation(self, agent_data: AgentData) -> AgentState:
         """Decide next state based on generated content."""
         
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🧭 ROUTING DECISION")
+        logger.info(f"{'='*80}")
+        
         # Extract tool calls from ALL response_ids (not just current interval)
         _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
+        
+        logger.info(f"  Tool calls found: {len(agent_data.tool_calls)}")
+        if agent_data.tool_calls:
+            for i, tool_call in enumerate(agent_data.tool_calls, 1):
+                logger.info(f"    {i}. {tool_call.name}({tool_call.arguments[:50]}{'...' if len(tool_call.arguments) > 50 else ''})")
         
         # Handle interaction if needed (add message to conversation)
         add_messages: list[dict[str, Any]] = []
@@ -365,27 +485,43 @@ class ToolAgentLoop(AgentLoopBase):
         # Determine next state
         if agent_data.tool_calls:
             # Found tool calls, process them
+            logger.info(f"  → Next state: PROCESSING_TOOLS")
+            logger.info(f"{'='*80}\n")
             return AgentState.PROCESSING_TOOLS
         elif self.interaction_config_file:
             # Need user interaction
+            logger.info(f"  → Next state: INTERACTING")
+            logger.info(f"{'='*80}\n")
             return AgentState.INTERACTING
         else:
             # No tools, no interaction - continue generating next interval
+            logger.info(f"  → Next state: GENERATING (continue to next interval)")
+            logger.info(f"{'='*80}\n")
             return AgentState.GENERATING
 
     async def _handle_processing_tools_state(self, agent_data: AgentData) -> AgentState:
         """Handle the processing tools state: execute tool calls and prepare tool responses."""
+        
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🔧 PROCESSING TOOLS STATE")
+        logger.info(f"{'='*80}")
+        logger.info(f"  Number of tool calls: {len(agent_data.tool_calls)}")
+        logger.info(f"  Max parallel calls: {self.max_parallel_calls}")
+        
         add_messages: list[dict[str, Any]] = []
         new_images_this_turn: list[Any] = []  # Local variable instead of agent_data attribute
 
         tasks = []
         tool_call_names = []
         for tool_call in agent_data.tool_calls[: self.max_parallel_calls]:
+            logger.info(f"  Executing tool: {tool_call.name}")
             tasks.append(self._call_tool(tool_call, agent_data.tools_kwargs))
             tool_call_names.append(tool_call.name)
 
         with simple_timer("tool_calls", agent_data.metrics):
             responses = await asyncio.gather(*tasks)
+        
+        logger.info(f"  ✓ Tool execution completed")
 
         # Process tool responses and update multi_modal_data
         # Removed: agent_data.new_images_this_turn = []
@@ -494,14 +630,33 @@ class ToolAgentLoop(AgentLoopBase):
             agent_data.response_logprobs += [0.0] * len(response_ids)
         agent_data.user_turns += 1
         
+        logger.info(f"\n  📊 After tool responses:")
+        logger.info(f"     Total prompt length: {len(agent_data.prompt_ids)}")
+        logger.info(f"     Remaining space: {self.max_model_len - len(agent_data.prompt_ids)}")
+        
+        # Check if we still have space
+        if len(agent_data.prompt_ids) >= self.max_model_len:
+            logger.info(f"  ❌ TERMINATING: Reached max_model_len after tool responses")
+            logger.info(f"{'='*80}\n")
+            return AgentState.TERMINATED
+        
         # Reset interval tracking for new turn
+        logger.info(f"  🔄 Resetting interval tracking for new turn")
         agent_data.is_first_interval_of_turn = True
         agent_data.response_ids = []  # Clear response_ids for next turn
         
+        logger.info(f"  → Next state: GENERATING (new turn)")
+        logger.info(f"{'='*80}\n")
         return AgentState.GENERATING
 
     async def _handle_interacting_state(self, agent_data: AgentData) -> AgentState:
         """Handle the interacting state: get user input from interaction."""
+        
+        logger.info(f"\n{'='*80}")
+        logger.info(f"👤 INTERACTING STATE")
+        logger.info(f"{'='*80}")
+        logger.info(f"  Waiting for user interaction...")
+        
         (
             should_terminate_sequence,
             interaction_responses,
@@ -511,6 +666,9 @@ class ToolAgentLoop(AgentLoopBase):
             agent_data.request_id, agent_data.messages, **agent_data.interaction_kwargs
         )
         agent_data.user_turns += 1
+        
+        logger.info(f"  User response received")
+        logger.info(f"  Should terminate: {should_terminate_sequence}")
 
         add_messages: list[dict[str, Any]] = [{"role": "user", "content": interaction_responses}]
         agent_data.messages.extend(add_messages)
@@ -552,11 +710,17 @@ class ToolAgentLoop(AgentLoopBase):
 
         # Check termination condition
         if should_terminate_sequence:
+            logger.info(f"  ❌ TERMINATING: User interaction requested termination")
+            logger.info(f"{'='*80}\n")
             return AgentState.TERMINATED
         else:
             # Reset interval tracking for new turn
+            logger.info(f"  🔄 Resetting interval tracking for new turn")
             agent_data.is_first_interval_of_turn = True
             agent_data.response_ids = []  # Clear response_ids for next turn
+            
+            logger.info(f"  → Next state: GENERATING (new turn)")
+            logger.info(f"{'='*80}\n")
             return AgentState.GENERATING
 
     async def _call_tool(

@@ -52,7 +52,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.multi_turn.enable=True \
     actor_rollout_ref.rollout.multi_turn.format=hermes \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
-    actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.n=2 \
     actor_rollout_ref.rollout.multi_turn.tool_config_path=/root/verl/dev_files/code_executor_tool_config.yaml \
     actor_rollout_ref.rollout.trace.backend=weave \
     actor_rollout_ref.rollout.trace.token2text=True \
@@ -67,8 +67,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
-    trainer.project_name='verl_prevent_eos' \
-    trainer.experiment_name='qwen3-0.6b_prevent_eos' \
+    trainer.project_name='verl_continuous_generation' \
+    trainer.experiment_name='qwen3-0.6b_continuous_generation' \
     trainer.val_before_train=False \
     trainer.n_gpus_per_node=2 \
     trainer.nnodes=1 \

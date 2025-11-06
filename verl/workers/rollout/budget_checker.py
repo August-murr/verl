@@ -36,7 +36,7 @@ def character_count_budget_checker(text: str, token_ids: list[int], total_tokens
     Returns:
         True if should continue (text < 500 chars), False to stop
     """
-    MAX_CHARS = 500
+    MAX_CHARS = 50000
     return len(text) < MAX_CHARS
 
 
