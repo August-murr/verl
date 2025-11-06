@@ -1,6 +1,14 @@
 #!/bin/bash
 set -x
 
+# Create logs directory if it doesn't exist
+mkdir -p /root/verl/logs
+
+# Redirect all output to log file with timestamp
+LOG_FILE="/root/verl/logs/training_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "Logging to: $LOG_FILE"
+
 # WORKAROUND: Disable NCCL P2P communication TP PREVENT FREEZES
 export NCCL_P2P_DISABLE=1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
@@ -24,7 +32,7 @@ python3 -m verl.trainer.main_ppo \
     data.return_raw_chat=$return_raw_chat \
     data.train_batch_size=32 \
     data.max_prompt_length=512 \
-    actor_rollout_ref.rollout.max_model_len=2048 \
+    actor_rollout_ref.rollout.max_model_len=1024 \
     data.max_response_length=1024 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \

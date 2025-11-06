@@ -151,7 +151,14 @@ class vLLMHttpServerBase:
 
         self.config: RolloutConfig = omega_conf_to_dataclass(config)
         self.model_config: HFModelConfig = omega_conf_to_dataclass(model_config, dataclass_type=HFModelConfig)
-        self.config.max_model_len = self.config.prompt_length + self.config.response_length
+        
+        # Only set max_model_len from prompt_length + response_length if not explicitly configured
+        if self.config.max_model_len is None:
+            self.config.max_model_len = self.config.prompt_length + self.config.response_length
+            logger.info(f"max_model_len not set, defaulting to prompt_length + response_length = {self.config.max_model_len}")
+        else:
+            logger.info(f"Using explicitly configured max_model_len = {self.config.max_model_len}")
+        
         self.rollout_mode = rollout_mode
         self.workers = workers
 
