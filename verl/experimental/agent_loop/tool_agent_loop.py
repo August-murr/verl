@@ -417,24 +417,24 @@ class ToolAgentLoop(AgentLoopBase):
             logger.info(f"\n  🔍 Running budget checker: {self.budget_checker_fn.__name__}")
             
             try:
-                # Decode all generated text so far
-                text_so_far = await self.loop.run_in_executor(
+                # Decode FULL conversation (prompt + generated response so far)
+                full_conversation_text = await self.loop.run_in_executor(
                     None,
-                    lambda: self.tokenizer.decode(agent_data.response_ids, skip_special_tokens=True)
+                    lambda: self.tokenizer.decode(agent_data.prompt_ids, skip_special_tokens=True)
                 )
                 
                 logger.info(f"\n  📋 Budget checker inputs:")
-                logger.info(f"     text: {repr(text_so_far[:100])}{'...' if len(text_so_far) > 100 else ''}")
-                logger.info(f"     text length: {len(text_so_far)} characters")
-                logger.info(f"     token_ids length: {len(agent_data.response_ids)} tokens")
+                logger.info(f"     text: {repr(full_conversation_text[:100])}{'...' if len(full_conversation_text) > 100 else ''}")
+                logger.info(f"     text length: {len(full_conversation_text)} characters")
+                logger.info(f"     token_ids length: {len(agent_data.prompt_ids)} tokens")
                 logger.info(f"     total_tokens_generated: {len(agent_data.response_ids)}")
                 
                 await asyncio.sleep(0.3)  # Small delay to make logging readable
                 
-                # Call budget checker function directly via class to avoid method binding
+                # Call budget checker function with FULL conversation
                 should_continue = self.__class__.budget_checker_fn(
-                    text_so_far,
-                    agent_data.response_ids,
+                    full_conversation_text,
+                    agent_data.prompt_ids,
                     len(agent_data.response_ids)
                 )
                 
